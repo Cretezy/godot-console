@@ -3,10 +3,24 @@ extends Node
 var enabled := true
 var enable_on_release_build := false : set = set_enable_on_release_build
 var pause_enabled := false
-var font_size := -1:
-	set(value):
-		font_size = value
-		_update_font_size()
+var size_small = 0.5
+var size_big = 1.0
+
+var default_commands: Array[String] = [
+	"quit",
+	"exit",
+	"clear",
+	"delete_history",
+	"help",
+	"calc",
+	"echo",
+	"echo_warning", 
+	"echo_info",
+	"echo_error",
+	"pause",
+	"unpause",
+	"exec",
+]
 
 signal console_opened
 signal console_closed
@@ -26,14 +40,14 @@ class ConsoleCommand:
 		description = in_description
 
 
-var control := Control.new()
+var control := Panel.new()
 
 # If you want to customize the way the console looks, you can direcly modify
 # the properties of the rich text and line edit here:
 var rich_label := RichTextLabel.new()
 var line_edit := LineEdit.new()
 
-var console_commands := {}
+var console_commands: Dictionary[String, ConsoleCommand] = {}
 var command_parameters := {}
 var console_history := []
 var console_history_index := 0
@@ -84,60 +98,49 @@ func _enter_tree() -> void:
 	var canvas_layer := CanvasLayer.new()
 	canvas_layer.layer = 3
 	add_child(canvas_layer)
-	control.anchor_bottom = 1.0
+
+	var control_style := StyleBoxFlat.new()
+	control_style.bg_color = Color(0, 0, 0, 0.5)
+	control.add_theme_stylebox_override("panel", control_style)
+	control.anchor_bottom = size_small
 	control.anchor_right = 1.0
 	canvas_layer.add_child(control)
+
+	var margin := 10 
+	var margin_container := MarginContainer.new()
+	margin_container.add_theme_constant_override("margin_top", margin + 2)
+	margin_container.add_theme_constant_override("margin_left", margin)
+	margin_container.add_theme_constant_override("margin_bottom", margin)
+	margin_container.add_theme_constant_override("margin_right", margin)
+	margin_container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	control.add_child(margin_container)
+
+	var vbox_container := VBoxContainer.new()
+	vbox_container.add_theme_constant_override("separation", 16)
+	vbox_container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin_container.add_child(vbox_container)
+
+
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color("000000d7")
+	style.bg_color = Color.TRANSPARENT
 	rich_label.selection_enabled = true
 	rich_label.context_menu_enabled = true
 	rich_label.bbcode_enabled = true
 	rich_label.scroll_following = true
-	rich_label.anchor_right = 1.0
-	rich_label.anchor_bottom = 0.5
+	rich_label.size_flags_vertical = Control.SizeFlags.SIZE_EXPAND_FILL
 	rich_label.add_theme_stylebox_override("normal", style)
-	if font_size > 0:
-		rich_label.add_theme_font_size_override("normal_font_size", font_size)
-		rich_label.add_theme_font_size_override("bold_font_size", font_size)
-		rich_label.add_theme_font_size_override("bold_italics_font_size", font_size)
-		rich_label.add_theme_font_size_override("italics_font_size", font_size)
-		rich_label.add_theme_font_size_override("mono_font_size", font_size)
-	control.add_child(rich_label)
-	rich_label.append_text("Development console.\n")
+	vbox_container.add_child(rich_label)
+	rich_label.append_text("Development console.\n\n")
 	line_edit.anchor_top = 0.5
 	line_edit.anchor_right = 1.0
 	line_edit.anchor_bottom = 0.5
 	line_edit.placeholder_text = "Enter \"help\" for instructions"
-	if font_size > 0:
-		line_edit.add_theme_font_size_override("font_size", font_size)
-	control.add_child(line_edit)
+	vbox_container.add_child(line_edit)
 	line_edit.text_submitted.connect(on_text_entered)
 	line_edit.text_changed.connect(on_line_edit_text_changed)
 	control.visible = false
 	process_mode = PROCESS_MODE_ALWAYS
 
-func _update_font_size():
-	for node in get_child(0).get_child(0).get_children():
-		if node is RichTextLabel:
-			if font_size > 0:
-				node.add_theme_font_size_override("normal_font_size", font_size)
-				node.add_theme_font_size_override("bold_font_size", font_size)
-				node.add_theme_font_size_override("bold_italics_font_size", font_size)
-				node.add_theme_font_size_override("italics_font_size", font_size)
-				node.add_theme_font_size_override("mono_font_size", font_size)
-			else:
-				node.remove_theme_font_size_override("normal_font_size")
-				node.remove_theme_font_size_override("bold_font_size")
-				node.remove_theme_font_size_override("bold_italics_font_size")
-				node.remove_theme_font_size_override("italics_font_size")
-				node.remove_theme_font_size_override("mono_font_size")
-		elif node is LineEdit:
-			if font_size > 0:
-				node.add_theme_font_size_override("font_size", font_size)
-			else:
-				node.remove_theme_font_size_override("font_size")
-				
-	
 
 func _exit_tree() -> void:
 	var console_history_file := FileAccess.open("user://console_history.txt", FileAccess.WRITE)
@@ -149,23 +152,25 @@ func _exit_tree() -> void:
 				console_history_file.store_line(line)
 			write_index += 1
 
+# Only adds if command is in [member default_commands]
+func add_default_command(command_name : String, function : Callable, arguments = [], required: int = 0, description : String = "") -> void:
+	if default_commands.has(command_name):
+		add_command(command_name, function, arguments, required, description)
 
 func _ready() -> void:
-	add_command("quit", quit, 0, 0, "Quits the game.")
-	add_command("exit", quit, 0, 0, "Quits the game.")
-	add_command("clear", clear, 0, 0, "Clears the text on the console.")
-	add_command("delete_history", delete_history, 0, 0, "Deletes the history of previously entered commands.")
-	add_command("help", help, 0, 0, "Displays instructions on how to use the console.")
-	add_command("commands_list", commands_list, 0, 0, "Lists all commands and their descriptions.")
-	add_command("commands", commands, 0, 0, "Lists commands with no descriptions.")
-	add_command("calc", calculate, ["mathematical expression to evaluate"], 0, "Evaluates the math passed in for quick arithmetic.")
-	add_command("echo", print_line, ["string"], 1, "Prints given string to the console.")
-	add_command("echo_warning", print_warning, ["string"], 1, "Prints given string as warning to the console.")
-	add_command("echo_info", print_info, ["string"], 1, "Prints given string as info to the console.")
-	add_command("echo_error", print_error, ["string"], 1, "Prints given string as an error to the console.")
-	add_command("pause", pause, 0, 0, "Pauses node processing.")
-	add_command("unpause", unpause, 0, 0, "Unpauses node processing.")
-	add_command("exec", exec, 1, 1, "Execute a script.")
+	add_default_command("quit", quit, 0, 0, "Quits the game.")
+	add_default_command("exit", quit, 0, 0, "Quits the game.")
+	add_default_command("clear", clear, 0, 0, "Clears the text on the console.")
+	add_default_command("delete_history", delete_history, 0, 0, "Deletes the history of previously entered commands.")
+	add_default_command("help", help, 0, 0, "Displays these instructions on how to use the console.")
+	add_default_command("calc", calculate, ["mathematical expression to evaluate"], 0, "Evaluates the math passed in for quick arithmetic.")
+	add_default_command("echo", print_line, ["string"], 1, "Prints given string to the console.")
+	add_default_command("echo_warning", print_warning, ["string"], 1, "Prints given string as warning to the console.")
+	add_default_command("echo_info", print_info, ["string"], 1, "Prints given string as info to the console.")
+	add_default_command("echo_error", print_error, ["string"], 1, "Prints given string as an error to the console.")
+	add_default_command("pause", pause, 0, 0, "Pauses node processing.")
+	add_default_command("unpause", unpause, 0, 0, "Unpauses node processing.")
+	add_default_command("exec", exec, 1, 1, "Execute a script.")
 
 func _input(event : InputEvent) -> void:
 	if (event is InputEventKey):
@@ -274,10 +279,7 @@ func reset_autocomplete() -> void:
 
 
 func toggle_size() -> void:
-	if (control.anchor_bottom == 1.0):
-		control.anchor_bottom = 1.9
-	else:
-		control.anchor_bottom = 1.0
+	control.anchor_bottom = size_big if is_equal_approx(control.anchor_bottom, size_small) else size_small
 
 
 func disable():
@@ -301,7 +303,7 @@ func toggle_console() -> void:
 		line_edit.grab_focus()
 		console_opened.emit()
 	else:
-		control.anchor_bottom = 1.0
+		control.anchor_bottom = size_small
 		scroll_to_bottom()
 		reset_autocomplete()
 		if (pause_enabled && !was_paused_already):
@@ -321,19 +323,17 @@ func scroll_to_bottom() -> void:
 func print_error(text : Variant, print_godot := false) -> void:
 	if not text is String:
 		text = str(text)
-	print_line("	   [color=light_coral]ERROR:[/color] %s" % text, print_godot)
-
+	print_line("[color=light_coral]ERROR:[/color] %s" % text, print_godot)
 
 func print_info(text : Variant, print_godot := false) -> void:
 	if not text is String:
 		text = str(text)
-	print_line("	   [color=light_blue]INFO:[/color] %s" % text, print_godot)
-
-
+	print_line("[color=light_blue]INFO:[/color] %s" % text, print_godot)
+	
 func print_warning(text : Variant, print_godot := false) -> void:
 	if not text is String:
 		text = str(text)
-	print_line("	   [color=gold]WARNING:[/color] %s" % text, print_godot)
+	print_line("[color=gold]WARNING:[/color] %s" % text, print_godot)
 
 
 func print_line(text : Variant, print_godot := false) -> void:
@@ -345,7 +345,7 @@ func print_line(text : Variant, print_godot := false) -> void:
 		rich_label.append_text(text)
 		rich_label.append_text("\n")
 		if (print_godot):
-			print_rich(text.dedent())
+			print(text)
 
 
 func parse_line_input(text : String) -> PackedStringArray:
@@ -394,7 +394,7 @@ func on_text_entered(new_text : String) -> void:
 	
 	if not new_text.strip_edges().is_empty():
 		add_input_history(new_text)
-		print_line("[i]> " + new_text + "[/i]")
+		print_line("[color=gray]>[/color] " + new_text)
 		var text_split := parse_line_input(new_text)
 		var text_command := text_split[0]
 		
@@ -445,25 +445,39 @@ func delete_history() -> void:
 
 
 func help() -> void:
-	rich_label.append_text("	Built in commands:
-		[color=light_green]calc[/color]: Calculates a given expresion
-		[color=light_green]clear[/color]: Clears the registry view
-		[color=light_green]commands[/color]: Shows a reduced list of all the currently registered commands
-		[color=light_green]commands_list[/color]: Shows a detailed list of all the currently registered commands
-		[color=light_green]delete_history[/color]: Deletes the commands history
-		[color=light_green]echo[/color]: Prints a given string to the console
-		[color=light_green]echo_error[/color]: Prints a given string as an error to the console
-		[color=light_green]echo_info[/color]: Prints a given string as info to the console
-		[color=light_green]echo_warning[/color]: Prints a given string as warning to the console
-		[color=light_green]pause[/color]: Pauses node processing
-		[color=light_green]unpause[/color]: Unpauses node processing
-		[color=light_green]quit[/color]: Quits the game
-	Controls:
-		[color=light_blue]Up[/color] and [color=light_blue]Down[/color] arrow keys to navigate commands history
-		[color=light_blue]PageUp[/color] and [color=light_blue]PageDown[/color] to scroll registry
-		[[color=light_blue]Ctrl[/color] + [color=light_blue]~[/color]] to change console size between half screen and full screen
-		[color=light_blue]~[/color] or [color=light_blue]Esc[/color] key to close the console
-		[color=light_blue]Tab[/color] key to autocomplete, [color=light_blue]Tab[/color] again to cycle between matching suggestions\n\n")
+	var built_in_commands = {
+		"calc": "Calculates a given expresion",
+		"clear": "Clears the registry view",
+		"commands": "Shows a reduced list of all the currently registered commands",
+		"commands_list": "Shows a detailed list of all the currently registered commands",
+		"delete_history": "Deletes the commands history",
+		"echo": "Prints a given string to the console",
+		"echo_error": "Prints a given string as an error to the console",
+		"echo_info": "Prints a given string as info to the console",
+		"echo_warning": "Prints a given string as warning to the console",
+		"pause": "Pauses node processing",
+		"unpause": "Unpauses node processing",
+		"quit": "Quits the game",
+	}
+	rich_label.append_text("Commands:\n")
+	# Sort names
+	var command_names := []
+	for command_name in console_commands:
+		if (!console_commands[command_name].hidden):
+			command_names.append(command_name)
+	command_names.sort()
+
+	for command_name in command_names:
+		var console_command := console_commands[command_name]
+		if !console_command.hidden:
+			rich_label.append_text("	[color=light_green]%s[/color]: %s\n" % [command_name, console_command.description])
+
+	rich_label.append_text("Controls:\n")
+	rich_label.append_text("	[color=light_blue]Up[/color] and [color=light_blue]Down[/color] arrow keys to navigate commands history\n")
+	rich_label.append_text("	[color=light_blue]PageUp[/color] and [color=light_blue]PageDown[/color] to scroll console\n")
+	rich_label.append_text("	[color=light_blue]Ctrl[/color] + [color=light_blue]~[/color] to change console size between half screen and full screen\n")
+	rich_label.append_text("	[color=light_blue]~[/color] or [color=light_blue]Esc[/color] key to close the console\n")
+	rich_label.append_text("	[color=light_blue]Tab[/color] key to autocomplete, [color=light_blue]Tab[/color] again to cycle between matching suggestions\n")
 
 
 func calculate(command : String) -> void:
@@ -477,35 +491,6 @@ func calculate(command : String) -> void:
 		print_line(str(result))
 	else:
 		print_error("%s" % expression.get_error_text())
-
-
-func commands() -> void:
-	var commands := []
-	for command in console_commands:
-		if (!console_commands[command].hidden):
-			commands.append(str(command))
-	commands.sort()
-	rich_label.append_text("	")
-	rich_label.append_text(str(commands) + "\n\n")
-
-
-func commands_list() -> void:
-	var commands := []
-	for command in console_commands:
-		if (!console_commands[command].hidden):
-			commands.append(str(command))
-	commands.sort()
-	
-	for command in commands:
-		var arguments_string := ""
-		var description : String = console_commands[command].description
-		for i in range(console_commands[command].arguments.size()):
-			if i < console_commands[command].required:
-				arguments_string += "  [color=cornflower_blue]<" + console_commands[command].arguments[i] + ">[/color]"
-			else:
-				arguments_string += "  <" + console_commands[command].arguments[i] + ">"
-		rich_label.append_text("	[color=light_green]%s[/color][color=gray]%s[/color]:   %s\n" % [command, arguments_string, description])
-	rich_label.append_text("\n")
 
 
 func add_input_history(text : String) -> void:
